@@ -72,7 +72,8 @@ func prepareWorkflowControllerConfigMap(clusterID string) map[string]string {
 }
 
 func GetProjectID(credentials types.Credentials) string {
-	var result string
+	var projectID string
+	var projectExists bool
 	userDetails, err := apis.GetProjectDetails(credentials)
 	if err != nil {
 		fmt.Printf("Error, cannot get project details: " + err.Error())
@@ -81,12 +82,17 @@ func GetProjectID(credentials types.Credentials) string {
 	for _, project := range userDetails.Data.Projects {
 		for _, member := range project.Members {
 			if (member.UserID == userDetails.Data.ID) && (member.Role == "Owner" || member.Role == "Editor") {
-				result = project.ID
+				projectID = project.ID
+				projectExists = true
 			}
 		}
 	}
-	return result
+	if !projectExists {
+		fmt.Printf("Error, Couldn't find any project where provided user is Editor/Owner...\n")
+		os.Exit(1)
+	}
 
+	return projectID
 }
 
 func GetAgentWithName(credentials types.Credentials, searchAgent types.Agent) (apis.AgentDetails, error) {
@@ -105,7 +111,7 @@ func GetAgentWithName(credentials types.Credentials, searchAgent types.Agent) (a
 func CreateAgent(credentials types.Credentials) {
 	newAgent, err := prepareNewAgent()
 	if err != nil {
-		fmt.Printf("Error, cannot create agent: " + err.Error())
+		fmt.Printf("Error, cannot create delegate: " + err.Error())
 		os.Exit(1)
 	}
 
@@ -122,13 +128,20 @@ func CreateAgent(credentials types.Credentials) {
 	if (agentExist == apis.AgentDetails{}) {
 		connectionData, err := apis.ConnectAgent(newAgent, credentials)
 		if err != nil {
-			fmt.Printf("Error, cannot declare agent. Error: " + err.Error() + "\n")
+			utils.Red.Println("\n❌ Chaos Delegate registration failed: " + err.Error() + "\n")
 			os.Exit(1)
 		}
+
+		if connectionData.Data.UserAgentReg.Token == "" {
+			utils.Red.Println("\n❌ failed to get the agent registration token: " + "\n")
+			os.Exit(1)
+		}
+
 		if (connectionData.Data == apis.AgentConnect{}) {
 			fmt.Printf("❌ Agent empty: Registration failed did graphql change ? \n")
 			os.Exit(1)
 		}
+
 		accessKey, err := validateAgent(connectionData.Data.UserAgentReg.Token, credentials.Endpoint)
 		if err != nil {
 			utils.Red.Println("❌ Error validate agent: ", err)
@@ -144,9 +157,10 @@ func CreateAgent(credentials types.Credentials) {
 		workflowConfigMap := prepareWorkflowControllerConfigMap(connectionData.Data.UserAgentReg.ClusterID)
 		kubernetes.CreateConfigMap(os.Getenv("WORKFLOW_CONTROLER_CONFIGMAP_NAME"), workflowConfigMap, os.Getenv("NAMESPACE"))
 
-		fmt.Printf("Agent Successfully declared, starting...\n")
+		fmt.Printf("Chaos Delegate Successfully registered, starting...\n")
 	} else {
-		fmt.Printf("Agent already exist, starting...\n")
+		fmt.Printf("Chaos Delegate already exists with provided name...\n")
+		os.Exit(1)
 	}
 }
 
@@ -254,10 +268,9 @@ func Login(LITMUS_FRONTEND_URL string, LITMUS_USERNAME string, LITMUS_PASSWORD s
 		os.Exit(1)
 	}
 
-	var credentials types.Credentials
-	credentials.Username = authInput.Username
-	credentials.Endpoint = authInput.Endpoint
-	credentials.Token = resp.AccessToken
-
-	return credentials
+	return types.Credentials{
+		Username: LITMUS_USERNAME,
+		Token:    resp.AccessToken,
+		Endpoint: LITMUS_FRONTEND_URL,
+	}
 }

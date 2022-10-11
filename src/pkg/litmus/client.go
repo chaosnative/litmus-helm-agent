@@ -160,6 +160,7 @@ func CreateAgent(credentials types.Credentials) {
 		fmt.Printf("Chaos Delegate Successfully registered, starting...\n")
 	} else {
 		fmt.Printf("Chaos Delegate already exists with provided name...\n")
+		os.Exit(1)
 	}
 }
 
